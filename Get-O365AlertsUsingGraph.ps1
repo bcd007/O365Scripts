@@ -9,9 +9,9 @@ Note:   This script uses only GraphAPI, no other modules are required.
         This script requires a json file with the AppID Key and encrypted secret.  The script can be modified to support a certificate or Azure keystore
 
 The SPO list is a standard SharePoint Online list that has the following columns:
-title,alertID,impactDescription,classification,featureGroup,service,status,startDateTime
+title,id,impactDescription,classification,featureGroup,service,status,startDateTime
 
-This script requires an Azure AD ApplicationID that has the following GraphAPI Application Permissions added and consented:
+This script requires an Azure AD ApplicationRegistration that has the following GraphAPI Application Permissions consented:
      ServiceMessage.Read.All
      ServiceHealth.Read.All
      Sites.Manage.All
@@ -27,7 +27,7 @@ Version:  1.0
 (Get-Content -Raw "C:\Temp\O365IssuesScriptData.json") | ConvertFrom-Json | C:\Temp\Get-O365AlertsUsingGraph.ps1
 
 .EXAMPLE
-Get-O365AlertsUsingGraph.ps1 -tenantID (tenantID) -clientFile (Path and/or Filename of CredFile.json) -siteID (GUID of SharePoint Site> -listId <GUID of SPO List to write to)
+Get-O365AlertsUsingGraph.ps1 -tenantID 648ce928-1175-4c5e-b65d-eeac50fc6258 -clientFile "C:\Temp\SomeCredFile.json" -siteID a1d0bdc1-1758-49db-a703-e082a4f5b465 -listId 167c6b88-044a-4f6f-b6d1-7785b8e75f65
 #>
 
 [CmdletBinding()]
@@ -61,7 +61,7 @@ $serviceStatusReturnURI = "https://graph.microsoft.com/v1.0/admin/serviceAnnounc
 $SvcHealthAlerts = Invoke-RestMethod -Headers $Header -Uri $serviceStatusReturnURI -Method Get -ContentType "application/json"
 $serviceHealthresults = $SvcHealthAlerts.value
 
-# Get another 900 because Micrsoft hasn't figured out how to sort their alerts by date....yet.
+# Get another 900 alerts because Microsoft hasn't figured out how to sort their alerts by date....yet.
 $count = 0
 Do{$count++ ; $serviceHealthresults += (Invoke-RestMethod -Uri $SvcHealthAlerts.'@odata.nextLink' -Headers $Header -Method Get -ContentType "application/json").Value}
 Until($count -eq 9)
@@ -77,26 +77,16 @@ $listItemstoAddURI = "https://graph.microsoft.com/v1.0/sites/$siteID/lists/$list
 
 # Parse through each service alert and determine if the individual alert needs to be added to or removed from the List.
 ForEach($svcAlertToAnalyze in $serviceHealthresults){
-    If($currentListItems.fields.AlertID -notcontains $svcAlertToAnalyze.Id -And $svcAlertToAnalyze.Status -eq "serviceDegradation"){
+    If($currentListItems.fields.Id0 -notcontains $svcAlertToAnalyze.Id -And $svcAlertToAnalyze.Status -eq "serviceDegradation"){
         # Create a nested hashtable to match the JSON format/case needed to add a list item via GraphAPI
-        $bodyToWrite = @{
-            fields = 
-                @{Title = $svcAlertToAnalyze.title
-                AlertID = $svcAlertToAnalyze.id
-                impactDescription = $svcAlertToAnalyze.impactDescription
-                classification = $svcAlertToAnalyze.classification
-                featureGroup = $svcAlertToAnalyze.featureGroup
-                service = $svcAlertToAnalyze.service
-                status = $svcAlertToAnalyze.status
-                startDateTime = $svcAlertToAnalyze.startDateTime
-            }
-        }
+        $bodyToWrite = @{fields = $svcAlertToAnalyze | Select-Object -Property title,@{n="Id0"; e={$_.Id}},impactDescription,classification,featureGroup,service,status,startDateTime}
+        
         # Add any new alerts with an status of 'serviceDegradation' that are not in the list already
         $addnewlistItemResults = Invoke-RestMethod -Headers $Header -Uri $listItemstoAddURI -Method POST -ContentType "application/json" -Body ($bodyToWrite | ConvertTo-Json)
     }
     # Remove any list items where the status has changed from 'serviceDegradation' to any other status
-    If($currentListItems.fields.AlertID -contains $svcAlertToAnalyze.Id -And $svcAlertToAnalyze.Status -eq "serviceRestored"){
-        $currentlistitems | Where-Object{$_.fields.AlertID -eq $svcAlertToAnalyze.Id} | ForEach-Object{
+    If($currentListItems.fields.Id0 -contains $svcAlertToAnalyze.Id -And $svcAlertToAnalyze.Status -eq "serviceRestored"){
+        $currentlistitems | Where-Object{$_.fields.Id0 -eq $svcAlertToAnalyze.Id} | ForEach-Object{
             $deleteListItemURI = "https://graph.microsoft.com/v1.0/sites/$siteID/lists/$listID/items/$($_.id)"
             $listItemsTodelete = Invoke-RestMethod -Headers $Header -Uri $deleteListItemURI  -Method DELETE -ContentType "application/json"
         }
